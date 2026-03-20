@@ -1,0 +1,322 @@
+---
+title: "Replication"
+format: pdf
+author: "Peng-Ting Kuo"
+---
+
+# Introduction
+
+This code is for replication for Weeks JL. Strongmen and Straw Men: Authoritarian Regimes and the Initiation of International Conflict. *American Political Science Review*. 2012;106(2):326-347.
+
+The author use Stata for data processing. We use R instead. The author's dataset and code can be found here: <https://www.jessicalpweeks.com/research.html>
+
+# Replication
+
+## Load dataset and packages
+
+```{r packages}
+# Replication of Weeks 2012 APSR
+# Translated from Stata to R
+
+#install.packages(c("haven", "fixest", "dplyr", "car", "marginaleffects", "ggplot2", "modelsummary"))
+
+
+# 1. Load Libraries -------------------------------------------------------
+library(haven) 
+library(fixest)          # For fast fixed effects and clustered SEs (replaces logit/xtlogit)
+library(ggplot2)
+library(modelsummary)  
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(car))             
+suppressPackageStartupMessages(library(marginaleffects)) 
+
+# 2. Load and Prepare Data ------------------------------------------------
+# Assuming the file is in your current working directory
+df <- read_dta("WeeksAPSR2012.dta")
+
+# Stata's 'pcyrsmzinits*' expansion refers to variables starting with that prefix.
+# We create a vector of those column names for easy inclusion in formulas.
+spline_vars <- grep("^pcyrsmzinits", names(df), value = TRUE)
+```
+
+## Regression
+
+### Table 1
+
+```{r}
+spline_vars <- grep("^pcyrsmzinits", names(df), value = TRUE)
+
+# --- 3. 執行模型估計 ---
+
+# Model (1): Basic covariates [cite: 1]
+m1 <- feglm(
+  fml = as.formula(paste("mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + cap_1 + cap_2 + majmaj + minmaj + majmin + pcyrsmzinit +", paste(spline_vars, collapse = " + "))),
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial",
+  cluster = ~dirdyadid
+)
+
+# Model (2): All covariates [cite: 2]
+m2 <- feglm(
+  fml = as.formula(paste("mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + newregime_1 + democracy_2 + cap_1 + cap_2 + initshare + dependlow + majmaj + minmaj + majmin + contigdum + logdist + s_wt_glo + s_lead_1 + s_lead_2 + pcyrsmzinit +", paste(spline_vars, collapse = " + "))),
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial",
+  cluster = ~dirdyadid
+)
+
+# Model (3): Basic covariates, FE [cite: 3]
+m3 <- feglm(
+  fml = as.formula(paste("mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + cap_1 + cap_2 + majmaj + minmaj + majmin + pcyrsmzinit +", paste(spline_vars, collapse = " + "))),
+  fixef = "dirdyadid",
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial"
+)
+
+# Model (4): All covariates, FE [cite: 3]
+m4 <- feglm(
+  fml = as.formula(paste("mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + newregime_1 + cap_1 + cap_2 + initshare + dependlow + majmaj + minmaj + majmin + pcyrsmzinit +", paste(spline_vars, collapse = " + "))),
+  fixef = "dirdyadid",
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial"
+)
+
+# 1. 將你的模型放入一個清單中
+models <- list(
+  "(1)\nBasic"    = m1.1,
+  "(2)\nAll"      = m1.2,
+  "(3)\nBasic, FE"= m1.3,
+  "(4)\nAll, FE"  = m1.4
+)
+
+# 2. 定義變數名稱轉換（左側是程式碼名稱，右側是表格顯示名稱）
+var_dict <- c(
+  "machinejlw_1"   = "Machine",
+  "juntajlw_1"     = "Junta",
+  "bossjlw_1"      = "Boss",
+  "strongmanjlw_1" = "Strongman",
+  "allotherauts_1" = "Other Nondemocracies",
+  "newregime_1"    = "New/Unstable Regime",
+  "cap_1"          = "Military Capabilities, Side A",
+  "cap_2"          = "Military Capabilities, Side B",
+  "initshare"      = "Side A's Proportion of Dyadic Capabilities",
+  "dependlow"      = "Lower Trade Dependence in Dyad"
+)
+
+# 3. 繪製表格
+modelsummary(
+  models,
+  coef_map = var_dict,           # 只顯示這些變數並重命名
+  stars = c('+' = .1, '*' = .05, '**' = .01), # 設定顯著性符號
+  statistic = "({statistic})",   # 顯示 z-statistics
+  gof_map = c("nobs"),           # 只保留 Observations 這一行
+  title = "TABLE 1. Directed-dyad Logit Analysis of Dispute Initiation, 1946–1999",
+  notes = list("+ significant at 10%; * significant at 5%; ** significant at 1%")
+)
+```
+
+### Table 2
+
+```{r Table 2}
+# 5. TABLE 2: Interaction Models -----------------------------------------
+
+# 2.1: Interaction between Personalism and Militarism
+# Stata: logit mzinit persrat_1 milrat_1 persXmil ...
+model_2_1 <- feglm(
+  fml = as.formula(paste("mzinit ~ persrat_1 * milrat_1 + newregime_1 + democracy_2 + 
+                         cap_1 + cap_2 + initshare + dependlow + majmaj + minmaj + 
+                         majmin + contigdum + logdist + s_wt_glo + s_lead_1 + s_lead_2 + 
+                         pcyrsmzinit +", paste(spline_vars, collapse = " + "))),
+  data = subset(df, democracy_1 == 0),
+  family = "binomial",
+  cluster = ~dirdyadid
+)
+```
+
+### Table 2
+
+```{r}
+# =============================================================================
+# Replication of Weeks 2012 APSR - R Version
+# Converted from WeeksAPSR2012.do
+# =============================================================================
+# 
+# 重要說明：
+# 1. Stata 的 logit + robust cluster() = R 的 glm() + sandwich::vcovCL()
+# 2. Stata 的 xtlogit, fe = R 的 survival::clogit() (conditional logit)
+#    注意：R 的 glm() + factor(panel) 不等於 conditional logit (xtlogit, fe)
+#    Stata xtlogit, fe 使用的是 Chamberlain conditional logit，
+#    等價於 survival::clogit()
+# 3. Stata xtlogit, fe 預設就是 robust SE（基於 Hessian），
+#    不支援額外的 cluster robust SE
+# =============================================================================
+
+library(haven)       # 讀取 .dta 檔
+library(sandwich)    # robust / cluster-robust SE
+library(lmtest)      # coeftest() 顯示 robust SE 的結果
+library(survival)    # clogit() = conditional logit (等同 Stata xtlogit, fe)
+library(car)         # linearHypothesis() 用於 testparm 等價檢定
+
+# --- 讀取資料 ---
+dat <- read_dta("WeeksAPSR2012.dta")
+
+# --- 確認 cubic spline 變數名稱 ---
+# Stata 的 pcyrsmzinits* 會 match 所有以 pcyrsmzinits 開頭的變數
+spline_vars <- grep("^pcyrsmzinits", names(dat), value = TRUE)
+cat("Cubic spline variables found:", spline_vars, "\n")
+
+# --- 建立公式輔助函式 ---
+make_formula <- function(dv, ivs) {
+  as.formula(paste(dv, "~", paste(ivs, collapse = " + ")))
+}
+
+# =============================================================================
+# TABLE 1
+# =============================================================================
+
+# --- 共用變數定義 ---
+regime_vars <- c("machinejlw_1", "juntajlw_1", "bossjlw_1", 
+                 "strongmanjlw_1", "allotherauts_1")
+cap_vars    <- c("cap_1", "cap_2")
+power_vars  <- c("majmaj", "minmaj", "majmin")
+time_vars   <- c("pcyrsmzinit", spline_vars)
+
+# Model 1.1 的額外 covariates
+basic_covs <- c(regime_vars, cap_vars, power_vars, time_vars)
+
+# Model 1.2 的額外 covariates
+all_covs <- c(regime_vars, "newregime_1", "democracy_2",
+              cap_vars, "initshare", "dependlow",
+              power_vars, "contigdum", "logdist", 
+              "s_wt_glo", "s_lead_1", "s_lead_2", time_vars)
+
+# 篩選條件：democracy_1 != NA
+dat_sub <- dat[!is.na(dat$democracy_1), ]
+
+# --- Table 1, Column 1: Basic covariates, pooled logit, cluster-robust SE ---
+cat("\n========== TABLE 1, MODEL 1 ==========\n")
+m1.1 <- glm(make_formula("mzinit", basic_covs), 
+             data = dat_sub, family = binomial(link = "logit"))
+# Cluster-robust SE (clustered on dirdyadid)
+vcov_m1.1 <- vcovCL(m1.1, cluster = dat_sub$dirdyadid[complete.cases(dat_sub[, c("mzinit", basic_covs)])])
+coeftest(m1.1, vcov. = vcov_m1.1)
+
+# Testparm equivalents: test equality of coefficients
+linearHypothesis(m1.1, "machinejlw_1 = juntajlw_1",   vcov. = vcov_m1.1)
+linearHypothesis(m1.1, "machinejlw_1 = bossjlw_1",    vcov. = vcov_m1.1)
+linearHypothesis(m1.1, "machinejlw_1 = strongmanjlw_1", vcov. = vcov_m1.1)
+linearHypothesis(m1.1, "juntajlw_1 = strongmanjlw_1", vcov. = vcov_m1.1)
+linearHypothesis(m1.1, "bossjlw_1 = strongmanjlw_1",  vcov. = vcov_m1.1)
+
+
+# --- Table 1, Column 2: All covariates, pooled logit, cluster-robust SE ---
+cat("\n========== TABLE 1, MODEL 2 ==========\n")
+m1.2 <- glm(make_formula("mzinit", all_covs), 
+             data = dat_sub, family = binomial(link = "logit"))
+vcov_m1.2 <- vcovCL(m1.2, cluster = dat_sub$dirdyadid[complete.cases(dat_sub[, c("mzinit", all_covs)])])
+coeftest(m1.2, vcov. = vcov_m1.2)
+
+linearHypothesis(m1.2, "machinejlw_1 = juntajlw_1",   vcov. = vcov_m1.2)
+linearHypothesis(m1.2, "machinejlw_1 = bossjlw_1",    vcov. = vcov_m1.2)
+linearHypothesis(m1.2, "machinejlw_1 = strongmanjlw_1", vcov. = vcov_m1.2)
+linearHypothesis(m1.2, "juntajlw_1 = strongmanjlw_1", vcov. = vcov_m1.2)
+linearHypothesis(m1.2, "bossjlw_1 = strongmanjlw_1",  vcov. = vcov_m1.2)
+
+
+# --- Table 1, Column 3: Basic covariates, Fixed Effects (conditional logit) ---
+# Stata xtlogit, fe = conditional logit
+# 使用 survival::clogit()，strata() 指定 panel (dirdyadid)
+cat("\n========== TABLE 1, MODEL 3 (FE) ==========\n")
+fe_basic_covs <- c(regime_vars, cap_vars, power_vars, time_vars)
+fe_formula_3 <- as.formula(
+  paste("mzinit ~", paste(fe_basic_covs, collapse = " + "), 
+        "+ strata(dirdyadid)")
+)
+m1.3 <- clogit(fe_formula_3, data = dat_sub, method = "exact")
+summary(m1.3)
+
+# clogit 的 testparm 等價：用 linearHypothesis (car 套件)
+# 注意：clogit 回傳的是 coxph 物件，linearHypothesis 可以直接用
+linearHypothesis(m1.3, "machinejlw_1 = juntajlw_1")
+linearHypothesis(m1.3, "machinejlw_1 = bossjlw_1")
+linearHypothesis(m1.3, "machinejlw_1 = strongmanjlw_1")
+linearHypothesis(m1.3, "juntajlw_1 = strongmanjlw_1")
+linearHypothesis(m1.3, "bossjlw_1 = strongmanjlw_1")
+
+
+# --- Table 1, Column 4: All covariates (FE), drop time-invariant vars ---
+# FE 模型不能包含 contigdum, logdist, s_wt_glo, s_lead_1, s_lead_2 等
+# 因為它們在 dyad 內不隨時間變化
+cat("\n========== TABLE 1, MODEL 4 (FE) ==========\n")
+fe_all_covs <- c(regime_vars, "newregime_1",
+                 cap_vars, "initshare", "dependlow",
+                 power_vars, time_vars)
+fe_formula_4 <- as.formula(
+  paste("mzinit ~", paste(fe_all_covs, collapse = " + "), 
+        "+ strata(dirdyadid)")
+)
+m1.4 <- clogit(fe_formula_4, data = dat_sub, method = "exact")
+summary(m1.4)
+
+linearHypothesis(m1.4, "machinejlw_1 = juntajlw_1")
+linearHypothesis(m1.4, "machinejlw_1 = bossjlw_1")
+linearHypothesis(m1.4, "machinejlw_1 = strongmanjlw_1")
+linearHypothesis(m1.4, "juntajlw_1 = strongmanjlw_1")
+linearHypothesis(m1.4, "bossjlw_1 = strongmanjlw_1")
+
+
+# =============================================================================
+# TABLE 2
+# =============================================================================
+
+# --- Table 2, Column 1: Cross-sectional, among autocratic regimes ---
+cat("\n========== TABLE 2, MODEL 1 ==========\n")
+dat_auto <- dat[dat$democracy_1 == 0 & !is.na(dat$democracy_1), ]
+
+t2_covs <- c("persrat_1", "milrat_1", "persXmil", "newregime_1", "democracy_2",
+             cap_vars, "initshare", "dependlow", power_vars, 
+             "contigdum", "logdist", "s_wt_glo", "s_lead_1", "s_lead_2", time_vars)
+
+m2.1 <- glm(make_formula("mzinit", t2_covs), 
+             data = dat_auto, family = binomial(link = "logit"))
+vcov_m2.1 <- vcovCL(m2.1, cluster = dat_auto$dirdyadid[complete.cases(dat_auto[, c("mzinit", t2_covs)])])
+coeftest(m2.1, vcov. = vcov_m2.1)
+
+
+# --- Table 2, Column 2: FE with raw scores, among autocratic regimes ---
+cat("\n========== TABLE 2, MODEL 2 (FE) ==========\n")
+# 需要額外篩選 party_1 != NA，且移除 dependlow（不收斂）
+dat_auto_fe <- dat_auto[!is.na(dat_auto$party_1), ]
+t2_fe_covs <- c("persrat_1", "milrat_1", "persXmil", "newregime_1",
+                cap_vars, "initshare", power_vars, time_vars)
+fe_formula_t2.2 <- as.formula(
+  paste("mzinit ~", paste(t2_fe_covs, collapse = " + "), 
+        "+ strata(dirdyadid)")
+)
+m2.2 <- clogit(fe_formula_t2.2, data = dat_auto_fe, method = "exact")
+summary(m2.2)
+
+
+# --- Table 2, Column 3: Cross-sectional, democracies assigned "0" ---
+cat("\n========== TABLE 2, MODEL 3 ==========\n")
+dat_t2.3 <- dat[!is.na(dat$democracy_1) & dat$regimejlw_1 < 6, ]
+t2.3_covs <- c("persrat_1a", "milrat_1", "persXmila", "newregime_1", "democracy_2",
+               cap_vars, "initshare", "dependlow", power_vars,
+               "contigdum", "logdist", "s_wt_glo", "s_lead_1", "s_lead_2", time_vars)
+
+m2.3 <- glm(make_formula("mzinit", t2.3_covs), 
+             data = dat_t2.3, family = binomial(link = "logit"))
+vcov_m2.3 <- vcovCL(m2.3, cluster = dat_t2.3$dirdyadid[complete.cases(dat_t2.3[, c("mzinit", t2.3_covs)])])
+coeftest(m2.3, vcov. = vcov_m2.3)
+
+
+# --- Table 2, Column 4: FE with raw scores, democracies assigned "0" ---
+cat("\n========== TABLE 2, MODEL 4 (FE) ==========\n")
+t2.4_covs <- c("persrat_1a", "milrat_1", "persXmila", "newregime_1",
+               cap_vars, "initshare", power_vars, time_vars)
+fe_formula_t2.4 <- as.formula(
+  paste("mzinit ~", paste(t2.4_covs, collapse = " + "), 
+        "+ strata(dirdyadid)")
+)
+m2.4 <- clogit(fe_formula_t2.4, data = dat, method = "exact")
+summary(m2.4)
+```

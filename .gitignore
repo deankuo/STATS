@@ -1,0 +1,12 @@
+# Personal
+.DS_Store
+.env
+*.Rproj
+.Rproj.user/
+*.ipynb
+
+# Dataset
+Data/
+
+# Replication
+Replication/

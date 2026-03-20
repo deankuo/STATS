@@ -1,0 +1,22 @@
+---
+title: "Data Clean"
+author: "Peng-Ting Kuo"
+format: pdf
+editor: visual
+---
+
+# Setup
+
+```{r packages}
+library(haven)
+suppressPackageStartupMessages(library(tidyverse))
+library(ggplot2)
+```
+
+# Datasets
+
+```{r dataset}
+
+```
+
+# Preprocessing
