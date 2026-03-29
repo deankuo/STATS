@@ -4,6 +4,7 @@
 *.Rproj
 .Rproj.user/
 *.ipynb
+.Rhistory
 
 # Dataset
 Data/

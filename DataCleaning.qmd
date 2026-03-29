@@ -16,7 +16,16 @@ library(ggplot2)
 # Datasets
 
 ```{r dataset}
+df <- read_stata("Data/WeeksAPSR2012.dta")
 
+colnames(df)
+```
+
+```{r IVs}
+# Use GWF dataset to construct the IVs
+gwf <- read_stata("./Data/GWF/GWF_AllPoliticalRegimes.dta")
+gwf_case <- read_stata("./Data/GWF/GWFcases.dta")
+gwf_tscs <- read_stata("./Data/GWF/GWFtscs.dta")
 ```
 
 # Preprocessing

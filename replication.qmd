@@ -32,7 +32,7 @@ suppressPackageStartupMessages(library(marginaleffects))
 
 # 2. Load and Prepare Data ------------------------------------------------
 # Assuming the file is in your current working directory
-df <- read_dta("WeeksAPSR2012.dta")
+df <- read_dta("./Data/WeeksAPSR2012.dta")
 
 # Stata's 'pcyrsmzinits*' expansion refers to variables starting with that prefix.
 # We create a vector of those column names for easy inclusion in formulas.
