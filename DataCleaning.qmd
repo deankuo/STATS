@@ -8,24 +8,553 @@ editor: visual
 # Setup
 
 ```{r packages}
-library(haven)
-suppressPackageStartupMessages(library(tidyverse))
-library(ggplot2)
+devtools::install_github('xmarquez/AuthoritarianismBook')
+
+suppressPackageStartupMessages({
+    library(haven)
+    library(tidyverse)
+    library(ggplot2)
+    library(ggeffects)
+    library(lmtest)
+    library(sandwich)
+    library(car)
+    library(fixest)
+    library(AuthoritarianismBook)
+    library(countrycode)
+    library(modelsummary)
+})
 ```
 
 # Datasets
 
-```{r dataset}
-df <- read_stata("Data/WeeksAPSR2012.dta")
+```{r Data Cleaning}
+#-99 NA로 바꿨는지
+# 버전 1: 원본 그대로 (Replication용)
+dat_orig <- dat_merged 
 
-colnames(df)
+# 버전 2: -99를 NA로 변환 (Corrected용)
+dat_clean <- dat_merged
+dat_clean[dat_clean == -99] <- NA
+
+# 1. 데이터셋 전체에서 -99를 NA로 변환
+dat_merged[dat_merged == -99] <- NA
+
+# 2. 변환이 잘 되었는지 확인 (polity2_1의 Min 값이 -10 ~ 10 사이로 와야 함)
+summary(dat_merged$polity2_1)
+
+
+# [1] 원본 데이터 모델 (Stata 결과와 수치가 일치해야 함)
+res_1_2_orig <- feglm(mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + 
+                        allotherauts_1 + newregime_1 + democracy_2 + cap_1 + cap_2 + 
+                        initshare + dependlow + majmaj + minmaj + majmin + 
+                        contigdum + logdist + s_wt_glo + s_lead_1 + s_lead_2 + 
+                        pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+                      data = subset(dat_orig, !is.na(democracy_1)),
+                      family = "logit", cluster = ~dirdyadid)
+
+# [2] -99 제거 데이터 모델 (실제 학술적 결론용)
+res_1_2_clean <- feglm(mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + 
+                         allotherauts_1 + newregime_1 + democracy_2 + cap_1 + cap_2 + 
+                         initshare + dependlow + majmaj + minmaj + majmin + 
+                         contigdum + logdist + s_wt_glo + s_lead_1 + s_lead_2 + 
+                         pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+                       data = subset(dat_clean, !is.na(democracy_1)),
+                       family = "logit", cluster = ~dirdyadid)
+
+# 두 결과 비교 출력
+etable(res_1_2_orig, res_1_2_clean, 
+       headers = c("Original (-99 Incl.)", "Cleaned (-99 as NA)"))
+
+coup <- read_csv("./ReplicationData/coup.csv")
+df <- df %>%
+  left_join(coup %>% select(ccode = cowcode, year, realized), 
+            by = c("ccode1" = "cowcode", "year" = "year")) %>%
+  mutate(log_oil_usd = ifelse(is.na(log_oil_usd), 0, realized))
+
+
+# 1.9 Logit Interaction (M1.2 based)
+# Equivalent to Stata's 'logit, robust cluster()'
+M1_9 <- feglm(
+  mzinit ~ i(machinejlw_1, L1.realized) + i(juntajlw_1, L1.realized) + 
+           i(bossjlw_1, L1.realized) + i(strongmanjlw_1, L1.realized) + 
+           allotherauts_1 + newregime_1 + democracy_2 + cap_1 + cap_2 + 
+           initshare + dependlow + majmaj + minmaj + majmin + contigdum + 
+           logdist + s_wt_glo + s_lead_1 + s_lead_2 + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3, 
+  data = subset(df, !is.na(democracy_1)),
+  family = "logit",
+  vcov = ~dirdyadid # Clustering
+)
+
+# 1.10 FE Interaction (M1.4 based)
+# Equivalent to Stata's 'xtlogit, fe'
+M1_10 <- feglm(
+  mzinit ~ i(machinejlw_1, L1.realized) + i(juntajlw_1, L1.realized) + 
+           i(bossjlw_1, L1.realized) + i(strongmanjlw_1, L1.realized) + 
+           allotherauts_1 + newregime_1 + cap_1 + cap_2 + 
+           initshare + dependlow + majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3 | dirdyadid, 
+  data = subset(df, !is.na(democracy_1)),
+  family = "logit"
+)
+
+# ============================================================================
+# Result Comparison Table (Console)
+# ============================================================================
+msummary(list("Interaction (Logit)" = M1_9, "Interaction (FE)" = M1_10),
+         stars = c('*' = .1, '**' = .05, '***' = .01),
+         estimate = "{estimate} ({std.error})",
+         title = "Interaction Effects of Regime Types and Lagged Coups")
+
+# ============================================================================
+# Export Final Table to Word/RTF
+# ============================================================================
+# Assuming M1_1 through M1_4 were previously defined
+model_list <- list(
+  "Logit(Coup_t)"   = M1_1, 
+  "Logit(Coup_t-1)" = M1_2, 
+  "FE(Coup_t)"      = M1_3, 
+  "FE(Coup_t-1)"    = M1_4, 
+  "Interact(Logit)" = M1_9, 
+  "Interact(FE)"    = M1_10
+)
+
+modelsummary(
+  model_list,
+  output = "Final_Analysis_Table.rtf",
+  stars = TRUE,
+  title = "Table: The Effects of Coups and Regime Types on Conflict Initiation",
+  gof_omit = 'AIC|BIC|Log.Lik|RMSE' # Cleaning up the footer
+)
 ```
 
-```{r IVs}
-# Use GWF dataset to construct the IVs
-gwf <- read_stata("./Data/GWF/GWF_AllPoliticalRegimes.dta")
-gwf_case <- read_stata("./Data/GWF/GWFcases.dta")
-gwf_tscs <- read_stata("./Data/GWF/GWFtscs.dta")
+```{r dataset}
+df <- read_stata("./ReplicationData/WeeksAPSR2012.dta")
+colnames(df)
+economic_data
+
+# 找出所有包含 "GDP" 字眼（不含 per capita）的變數名稱
+levels(economic_data$variable)
+
+oil_final <- Ross %>%
+  select(year, GWn, cown, oil_usd = oil_gas_value_2014) %>%
+  distinct(GWn, year, .keep_all = TRUE) %>%
+  mutate(log_oil_usd = log(oil_usd + 1))
+
+# 2. 合併回主資料集 (針對 Side A)
+df <- df %>%
+  left_join(oil_final %>% select(ccode = cown, year, log_oil_usd), 
+            by = c("ccode1" = "ccode", "year" = "year")) %>%
+  # 沒資料的視為不產油，補 0
+  mutate(log_oil_usd = ifelse(is.na(log_oil_usd), 0, log_oil_usd))
+
+summary(df$log_oil_usd)
+hist(df$log_oil_usd, main="Distribution of Log Oil Wealth")
 ```
 
 # Preprocessing
+
+```{r}
+# 篩選出有發動攻擊 (mzinit == 1) 的觀測值
+initiations <- df[df$mzinit == 1, ]
+
+# 建立一個函數來識別該年度 Side A 和 Side B 的政體名稱
+get_regime_type <- function(data, suffix) {
+  ifelse(data[[paste0("democracy", suffix)]] == 1, "Democracy",
+  ifelse(data[[paste0("machinejlw", suffix)]] == 1, "Machine",
+  ifelse(data[[paste0("juntajlw", suffix)]] == 1, "Junta",
+  ifelse(data[[paste0("bossjlw", suffix)]] == 1, "Boss",
+  ifelse(data[[paste0("strongmanjlw", suffix)]] == 1, "Strongman", "Other")))))
+}
+
+# 標註政體類型
+initiations$type_A <- get_regime_type(initiations, "_1")
+initiations$type_B <- get_regime_type(initiations, "_2")
+
+# 產生交叉表：看 Side A 類型對 Side B 類型發動攻擊的次數
+table(initiations$type_A, initiations$type_B)
+
+
+df <- df %>%
+  mutate(audience = case_when(
+    machinejlw_1 == 1 ~ 1,
+    bossjlw_1 == 1    ~ 1,
+    juntajlw_1 == 1   ~ 0,
+    strongmanjlw_1 == 1 ~ 0,
+    TRUE              ~ NA_real_ 
+  ))
+
+df <- df %>%
+    mutate(personList = case_when(
+        bossjlw_1 == 1 ~ 1,
+        strongmanjlw_1 == 1 ~ 1,
+        machinejlw_1 == 1 ~ 0,
+        juntajlw_1 == 1   ~ 0,
+        TRUE              ~ NA_real_
+    ))
+
+df %>%
+  group_by(audience) %>%
+  summarise(
+    machines = sum(machinejlw_1 == 1, na.rm = TRUE),
+    bosses = sum(bossjlw_1 == 1, na.rm = TRUE),
+    juntas = sum(juntajlw_1 == 1, na.rm = TRUE),
+    strongmen = sum(strongmanjlw_1 == 1, na.rm = TRUE)
+  )
+
+# 2. 執行 Logit 模型
+model_interaction <- glm(
+  mzinit ~ personList * audience + allotherauts_1 + cap_1 + cap_2 + 
+           majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3, 
+  data = subset(df, !is.na(audience) & !is.na(personList)), 
+  family = binomial(link = "logit")
+)
+
+# 3. 計算群聚標準誤
+clustered_se <- vcovCL(model_interaction, cluster = ~dirdyadid)
+coeftest(model_interaction, vcov = clustered_se)
+
+pred_probs <- ggpredict(model_interaction, terms = c("audience [0,1]", "personList [0,1]"))
+
+# 2. 繪製預測機率圖 (對應論文 Figure 4 的邏輯)
+ggplot(pred_probs, aes(x = factor(x), y = predicted, color = factor(group))) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.1) +
+  scale_x_discrete(labels = c("0" = "Military", "1" = "Civilian")) +
+  scale_color_discrete(name = "Personalist", labels = c("0" = "Constrained", "1" = "Personalist")) +
+  labs(title = "Predicted Probability of MID Initiation",
+       x = "Audience Type",
+       y = "Probability of Initiation") +
+  theme_minimal()
+```
+
+```{r Regime Instability}
+# There are 11 countries that are autocracy but start with 0 in 1946
+df1946 <- df %>%
+    filter(juntajlw_1 == 1 | strongmanjlw_1 == 1 | machinejlw_1 == 1 | bossjlw_1 == 1) %>%
+    filter(year == 1946)
+
+# 1. 定義 1946 年起始年資的種子資料 (根據歷史紀錄)
+# 這些 ccode 對應：ALB, DOM, LBR, MEX, NIC, PAR, POR, RUS, SAL, SPN, YUG
+seeds_data <- data.frame(
+  ccode = c(339, 42, 450, 70, 92, 150, 235, 365, 91, 230, 345),
+  start_tenure = c(2, 16, 2, 17, 10, 6, 14, 24, 15, 7, 1)
+)
+
+# 2. 定義一個通用的 Tenure 計算函數
+# 此函數會處理「左截斷補值」與「NA 視為 0」的邏輯
+calculate_tenure_ref <- function(data, country_col, regime_col, output_name) {
+  
+  # 將字串轉換為符號以供 dplyr 使用
+  c_col <- sym(country_col)
+  r_col <- sym(regime_col)
+  
+  data %>%
+    # A. 提取唯一的「國家-年份-政權狀態」組合，避免配對資料導致重複累計
+    distinct(!!c_col, year, !!r_col) %>%
+    group_by(!!c_col) %>%
+    arrange(year) %>%
+    mutate(
+      # B. 處理 NA：將 newregime 視為 0 (代表無變動) 
+      reg_clean = ifelse(is.na(!!r_col), 0, !!r_col),
+      is_start_year = (year == min(year)),
+      
+      # C. 判定政權更迭起點 (Onset)
+      # 邏輯：第一年強制算起點；之後只有從 0 變成 1 的那一刻算新政權開始
+      is_change = case_when(
+        is_start_year ~ 1,
+        reg_clean == 1 & lag(reg_clean, default = 0) == 0 ~ 1,
+        TRUE ~ 0
+      ),
+      reg_id = cumsum(is_change)
+    ) %>%
+    group_by(!!c_col, reg_id) %>%
+    mutate(
+      # D. 計算在資料集內觀察到的存續年數
+      years_obs = row_number() - 1,
+      
+      # E. 1946 年特殊補值 (僅針對那 11 個國家)
+      seed = ifelse(first(year) == 1946 & first(!!c_col) %in% seeds_data$ccode,
+                    seeds_data$start_tenure[match(first(!!c_col), seeds_data$ccode)],
+                    0),
+      
+      # F. 最終計算結果
+      final_val = seed + years_obs
+    ) %>%
+    ungroup() %>%
+    # 只回傳關鍵欄位用於合併
+    select(!!c_col, year, !!output_name := final_val)
+}
+
+# 3. 分別為 Side A (發動方) 與 Side B (目標方) 計算 Tenure
+# 假設發動方變數為 ccode1/newregime_1，目標方為 ccode2/newregime_2
+ref_init   <- calculate_tenure_ref(df, "ccode1", "newregime_1", "tenure_1")
+ref_target <- calculate_tenure_ref(df, "ccode2", "newregime_2", "tenure_2")
+
+# 4. 合併回原始資料集
+df <- df %>%
+    # 移除可能存在的舊 tenure 欄位避免衝突
+    select(-any_of(c("tenure", "tenure_1", "tenure_2"))) %>%
+    # 合併發動方年資
+    left_join(ref_init, by = c("ccode1", "year")) %>%
+    # 合併目標方年資
+    left_join(ref_target, by = c("ccode2", "year")) %>%
+    # log
+    mutate(tenure_1_log = log(tenure_1 + 1),
+           tenure_2_log = log(tenure_2 + 1))
+
+df_ <- df %>% 
+    filter(democracy_1 == 1)
+df_[which.max(df_$tenure_1), c("ccode1", "abbrev1", "year", "tenure_1", "newregime_1")]
+
+df %>%
+    filter(ccode1 == 2) %>%
+    select(year, tenure_1, newregime_1)
+```
+
+```{r Analysis}
+m1_1 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           cap_1 + cap_2 + majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+  data = subset(df, !is.na(democracy_1)), # 對應 if democracy_1 != .
+  family = "binomial",
+  cluster = ~dirdyadid # 對應 cluster(dirdyadid)
+)
+
+# --- Table 1.2 (完整模型) ---
+m1_2 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           tenure_1_log + democracy_2 + cap_1 + cap_2 + initshare + dependlow + log_oil_usd +
+           majmaj + minmaj + majmin + contigdum + logdist + s_wt_glo +  
+           s_lead_1 + s_lead_2 + pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial",
+  cluster = ~dirdyadid
+)
+
+m1_3 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           cap_1 + cap_2 + majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3 | dirdyadid, # | 後方接 FE
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial"
+)
+
+# --- Table 1.4 (FE 完整模型) ---
+# 注意：此模型會自動剔除不隨時間變動的變數 (如距離、鄰接性) [cite: 673]
+m1_4 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           tenure_1_log + tenure_2_log + cap_1 + cap_2 + initshare + dependlow + 
+           majmaj + minmaj + majmin + log_oil_usd + democracy_2 + contigdum + logdist + s_wt_glo +  s_lead_1 + s_lead_2 +
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3 | dirdyadid,
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial"
+)
+
+
+
+# 1. 將模型放入一個具名的清單中
+models_list <- list(
+  "Pooled (Basic)" = m1_1,
+  "Pooled (Full)"  = m1_2,
+  "FE (Basic)"     = m1_3,
+  "FE (Full)"      = m1_4
+)
+
+modelsummary(
+  models_list,
+  stars = TRUE,                                # 顯示顯著性星星 (* p < 0.1, ** p < 0.05, *** p < 0.01) [cite: 52, 67]
+  coef_rename = c(                             # 重新命名變數讓表格更專業
+    "machinejlw_1"   = "Machine",
+    "juntajlw_1"     = "Junta",
+    "bossjlw_1"      = "Boss",
+    "strongmanjlw_1" = "Strongman",
+    "tenure_1_log"   = "Tenure (Side A, log)",
+    "log_oil_usd"    = "Petro",
+    "tenure_2_log"   = "Tenure (Side B, log)",
+    "cap_1"          = "Capabilities (Side A)",
+    "cap_2"          = "Capabilities (Side B)"
+  ),
+  gof_map = c("nobs", "r.squared", "logLik"),  # 選擇要顯示的診斷統計量
+  title = "Table 1: Regime Type and MID Initiation",
+  notes = "Standard errors are clustered by directed dyad."
+)
+
+# 直接並排顯示，並自動進行群聚標準誤調整
+etable(
+  m1_1, m1_2, m1_3, m1_4,
+  cluster = "dirdyadid",                       # 確保所有模型的標準誤都經過群聚調整 
+  subtitles = c("Basic", "Full", "FE-Basic", "FE-Full"),
+  dict = c(                                    # 字典功能用於轉換變數名稱
+    machinejlw_1 = "Machine", 
+    juntajlw_1 = "Junta",
+    tenure_1_log = "Log Tenure"
+  ),
+  order = c("Machine", "Junta", "Boss", "Strongman"), # 調整變數出現順序
+  tex = FALSE                                  # 若設為 TRUE 則直接輸出 LaTeX 代碼
+)
+```
+
+```{r Visualization}
+library(ggeffects)
+library(ggplot2)
+library(dplyr)
+
+# 1. 分別計算五種政體類型的預測值
+# 我們固定其他變數在平均值，並設定對應的政體 dummy 為 1
+# 所有的 condition 設定確保一次只有一種政體被啟動
+
+# (A) Democracy (基準組：所有威權 dummy 皆為 0)
+p_dem <- ggpredict(m1_2, terms = "tenure_1_log [all]", 
+                   condition = c(machinejlw_1=0, juntajlw_1=0, bossjlw_1=0, strongmanjlw_1=0, allotherauts_1=0))
+p_dem$group <- "Democracy"
+
+# (B) Machine
+p_mac <- ggpredict(m1_2, terms = "tenure_1_log [all]", 
+                   condition = c(machinejlw_1=1, juntajlw_1=0, bossjlw_1=0, strongmanjlw_1=0, allotherauts_1=0))
+p_mac$group <- "Machine"
+
+# (C) Junta
+p_jun <- ggpredict(m1_2, terms = "tenure_1_log [all]", 
+                   condition = c(machinejlw_1=0, juntajlw_1=1, bossjlw_1=0, strongmanjlw_1=0, allotherauts_1=0))
+p_jun$group <- "Junta"
+
+# (D) Boss
+p_bos <- ggpredict(m1_2, terms = "tenure_1_log [all]", 
+                   condition = c(machinejlw_1=0, juntajlw_1=0, bossjlw_1=1, strongmanjlw_1=0, allotherauts_1=0))
+p_bos$group <- "Boss"
+
+# (E) Strongman
+p_str <- ggpredict(m1_2, terms = "tenure_1_log [all]", 
+                   condition = c(machinejlw_1=0, juntajlw_1=0, bossjlw_1=0, strongmanjlw_1=1, allotherauts_1=0))
+p_str$group <- "Strongman"
+
+# 2. 合併所有預測結果
+all_regimes_pred <- rbind(p_dem, p_mac, p_jun, p_bos, p_str)
+
+# 3. 繪圖
+ggplot(all_regimes_pred, aes(x = x, y = predicted, color = group, fill = group)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.1, color = NA) +
+  scale_x_continuous(labels = function(x) round(exp(x) - 1, 0)) + # 將 Log 轉回實際年數
+  labs(
+    title = "Predicted Probability of MID Initiation by Regime Type",
+    subtitle = "Varying Side A Tenure (Based on Model 1.2)",
+    x = "Regime Tenure (Years)",
+    y = "Predicted Probability of Initiation",
+    color = "Regime Type",
+    fill = "Regime Type"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+# Alliance & Cold War
+
+```{r Alliance}
+alliance <- read.csv("../selenium/WTO_Analysis/Data/ATOP_5.1/atop5_1ddyr.csv")
+alliance <- alliance %>%
+    filter(year >= 1946 & year <=1999) %>%
+    select(stateA, stateB, year, atopally, defense, offense, neutral, nonagg, consul)
+
+df <- df %>%
+  left_join(alliance, by = c("ccode1" = "stateA", "ccode2" = "stateB", "year"))
+
+atop_cols <- c("atopally", "defense", "offense", "neutral", "nonagg", "consul")
+df[atop_cols][is.na(df[atop_cols])] <- 0
+
+# cold war
+df <- df %>%
+    mutate(cold_war = ifelse(year > 1991, 0, 1))
+
+# --- 模型 1.1: 基礎擴充模型 (Pooled Logit) ---
+# 目的：驗證加入 Tenure_1 後，原本的政體效果是否依然穩健。
+m1_1 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           tenure_1_log + defense + offense + neutral + nonagg + consul +  # 新增變數
+           cap_1 + cap_2 + majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial",
+  cluster = ~dirdyadid
+)
+
+# --- 模型 1.2: 完整互動模型 (Pooled Logit + Interaction) ---
+# 目的：測試「誰攻擊誰」的邏輯。例如：強人是否更敢攻擊「沒盟友」或「沒經驗」的國家？
+m1_2 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           tenure_1_log + tenure_2_log + defense + offense + neutral + nonagg + consul + cold_war + 
+           cap_1 + cap_2 + initshare + dependlow + 
+           majmaj + minmaj + majmin + contigdum + logdist + s_wt_glo + 
+           s_lead_1 + s_lead_2 + pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial",
+  cluster = ~dirdyadid
+)
+
+# --- 模型 1.3: 基礎固定效應模型 (Fixed Effects) ---
+# 目的：控制配對特徵，看「同一個國家」隨著變老（Tenure）或簽署盟約（ATOP）後的行為變化。
+m1_3 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           tenure_1_log + defense + offense + neutral + nonagg + consul + 
+           cap_1 + cap_2 + majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3 | dirdyadid,
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial"
+)
+
+# --- 模型 1.4: 終極擴充模型 (FE + 多重控制) ---
+# 目的：排除所有不隨時間變動的干擾因素，這是目前國際關係研究最嚴謹的設定。
+m1_4 <- feglm(
+  mzinit ~ machinejlw_1 + juntajlw_1 + bossjlw_1 + strongmanjlw_1 + allotherauts_1 + 
+           tenure_1_log + tenure_2_log + defense + offense + neutral + nonagg + consul + cold_war + # FE 內也可以放，因為它隨時間變動
+           cap_1 + cap_2 + initshare + dependlow + 
+           majmaj + minmaj + majmin + 
+           pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3 | dirdyadid,
+  data = subset(df, !is.na(democracy_1)),
+  family = "binomial"
+)
+```
+
+```{r}
+library(modelsummary)
+
+# 1. 建立模型清單
+models_list <- list(
+  "Pooled (Basic)" = m1_1,
+  "Pooled (Int)"   = m1_2,
+  "FE (Basic)"     = m1_3,
+  "FE (Full)"      = m1_4
+)
+
+# 2. 定義要顯示的變數名稱 (讓表格更專業)
+cm <- c(
+  "machinejlw_1"            = "Machine",
+  "juntajlw_1"              = "Junta",
+  "bossjlw_1"               = "Boss",
+  "strongmanjlw_1"          = "Strongman",
+  "tenure_1_log"            = "Tenure (Side A, log)",
+  "tenure_2_log"            = "Tenure (Side B, log)",
+  # "atopally"                = "Alliance (ATOP)",
+  # "strongmanjlw_1:atopally" = "Strongman x Alliance",
+  "defense" = "Defense",
+  "offense" = "Offense",
+  "neutral" = "Neutral",
+  "nonagg"  = "nonagg",
+  "consul"  = "consul",
+  "cold_war"                = "Cold War"
+)
+
+# 3. 輸出表格
+modelsummary(
+  models_list,
+  stars = TRUE,
+  coef_map = cm,           # 只顯示關鍵政體與時間變數
+  cluster = "dirdyadid",       # 確保顯示群聚標準誤
+  gof_omit = "AIC|BIC|Log.Lik|Std.Errors",
+  title = "Regime Type, Tenure, and Alliances on MID Initiation",
+  notes = "Standard errors clustered by directed dyad."
+)
+```
