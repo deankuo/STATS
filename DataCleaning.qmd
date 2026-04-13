@@ -133,7 +133,6 @@ df <- read_stata("./ReplicationData/WeeksAPSR2012.dta")
 colnames(df)
 economic_data
 
-# 找出所有包含 "GDP" 字眼（不含 per capita）的變數名稱
 levels(economic_data$variable)
 
 oil_final <- Ross %>%
@@ -218,15 +217,19 @@ coeftest(model_interaction, vcov = clustered_se)
 pred_probs <- ggpredict(model_interaction, terms = c("audience [0,1]", "personList [0,1]"))
 
 # 2. 繪製預測機率圖 (對應論文 Figure 4 的邏輯)
-ggplot(pred_probs, aes(x = factor(x), y = predicted, color = factor(group))) +
+p1 <- ggplot(pred_probs, aes(x = factor(x), y = predicted, color = factor(group))) +
   geom_point(size = 3) +
   geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.1) +
   scale_x_discrete(labels = c("0" = "Military", "1" = "Civilian")) +
   scale_color_discrete(name = "Personalist", labels = c("0" = "Constrained", "1" = "Personalist")) +
-  labs(title = "Predicted Probability of MID Initiation",
-       x = "Audience Type",
-       y = "Probability of Initiation") +
+  labs(# title = "Predicted Probability of MID Initiation",
+       x = NULL,
+       y = NULL) +
   theme_minimal()
+
+print(p1)
+
+ggsave("./Graph/typology_paper.png", plot = p1, width = 14, height = 14, units = "cm", dpi = 300)
 ```
 
 ```{r Regime Instability}
@@ -435,20 +438,22 @@ p_str$group <- "Strongman"
 all_regimes_pred <- rbind(p_dem, p_mac, p_jun, p_bos, p_str)
 
 # 3. 繪圖
-ggplot(all_regimes_pred, aes(x = x, y = predicted, color = group, fill = group)) +
+p2 <- ggplot(all_regimes_pred, aes(x = x, y = predicted, color = group, fill = group)) +
   geom_line(size = 1.2) +
   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.1, color = NA) +
   scale_x_continuous(labels = function(x) round(exp(x) - 1, 0)) + # 將 Log 轉回實際年數
   labs(
-    title = "Predicted Probability of MID Initiation by Regime Type",
-    subtitle = "Varying Side A Tenure (Based on Model 1.2)",
-    x = "Regime Tenure (Years)",
-    y = "Predicted Probability of Initiation",
+    # title = "Predicted Probability of MID Initiation by Regime Type",
+    # subtitle = "Varying Side A Tenure (Based on Model 1.2)",
+    x = NULL,
+    y = NULL,
     color = "Regime Type",
     fill = "Regime Type"
   ) +
   theme_minimal() +
   theme(legend.position = "bottom")
+
+ggsave("./Graph/tenure_plot.png", plot = p2, width = 14, height = 12, dpi = 300, unit = "cm")
 ```
 
 # Alliance & Cold War
