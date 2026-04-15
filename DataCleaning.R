@@ -275,9 +275,6 @@ m_ally_4 <- feglm(
 # ==============================================================================
 # Theme
 # ==============================================================================
-
-# 1. 優化您的 Theme
-# 注意：為了讓 patchwork 成功合併 legend，我們在這裡明確加上 name = "Alliance Status"
 interaction_plot_theme <- list(
     scale_colour_manual(
         name = "Alliance Status", 
@@ -290,41 +287,75 @@ interaction_plot_theme <- list(
         labels = c("0" = "No Alliance", "1" = "Allied")
     ),
     theme_bw(base_size = 11)
-    # 將 legend.position 移出這裡，稍後統一交由 patchwork 處理
 )
 
-# 2. 繪製個別圖表 (這裡保留您的 ggpredict 寫法)
-p_boss <- plot(
-    ggpredict(m_ally_4, terms = c("bossjlw_1 [0,1]", "atopally [0,1]"))
-) +
-    scale_x_continuous(breaks = c(0, 1), labels = c("Non-Boss", "Boss")) +
+
+# ==========================================
+# 1. 使用 ggpredict 抽取數據 (回到你原本最穩定的寫法)
+# ==========================================
+df_boss <- as.data.frame(ggpredict(m_ally_4, terms = c("bossjlw_1 [0,1]", "atopally [0,1]")))
+df_junta <- as.data.frame(ggpredict(m_ally_4, terms = c("juntajlw_1 [0,1]", "atopally [0,1]")))
+df_strongman <- as.data.frame(ggpredict(m_ally_4, terms = c("strongmanjlw_1 [0,1]", "atopally [0,1]")))
+
+# ==========================================
+# 2. 繪製圖表 (✨ 直接加上 factor() 解決貼邊問題)
+# ==========================================
+pd <- position_dodge(width = 0.05) # 設定微小的錯開距離
+
+# (1) 繪製 Boss 圖
+p_boss <- ggplot(df_boss, aes(x = factor(x),               # ✨ 關鍵：轉為離散類別
+                              y = predicted,               # ggpredict 的預測值欄位是 predicted
+                              color = factor(group),       # ggpredict 的分組欄位是 group
+                              group = factor(group))) +
+    geom_point(position = pd, size = 3) +
+    geom_line(position = pd) +
+    scale_x_discrete(labels = c("0" = "Non-Boss", "1" = "Boss")) +
+    scale_y_continuous(limits = c(0.002, 0.0075)) +
     interaction_plot_theme +
     labs(title = NULL, x = NULL, y = "Predicted Probability of MID Initiation")
 
-p_strongman <- plot(
-    ggpredict(m_ally_4, terms = c("strongmanjlw_1 [0,1]", "atopally [0,1]"))
-) +
-    scale_x_continuous(breaks = c(0, 1), labels = c("Non-Strongman", "Strongman")) +
+# (2) 繪製 Junta 圖
+p_junta <- ggplot(df_junta, aes(x = factor(x), 
+                                y = predicted, 
+                                color = factor(group), 
+                                group = factor(group))) +
+    geom_point(position = pd, size = 3) +
+    geom_line(position = pd) +
+    scale_x_discrete(labels = c("0" = "Non-Junta", "1" = "Junta")) +
+    scale_y_continuous(limits = c(0.002, 0.0075)) +
     interaction_plot_theme +
-    labs(title = NULL, x = NULL, y = NULL) # 第二張圖可省略 Y 軸標籤以求簡潔
+    labs(title = NULL, x = NULL, y = NULL)
 
-# 3. 使用 Patchwork 拼接並進行「全域設定」
-panel_interactions <- (p_boss | p_strongman) +
-    plot_layout(guides = "collect") +          # ✨ 關鍵：收集並合併重複的圖例
+# (3) 繪製 Strongman 圖
+p_strongman <- ggplot(df_strongman, aes(x = factor(x), 
+                                        y = predicted, 
+                                        color = factor(group), 
+                                        group = factor(group))) +
+    geom_point(position = pd, size = 3) +
+    geom_line(position = pd) +
+    scale_x_discrete(labels = c("0" = "Non-Strongman", "1" = "Strongman")) +
+    scale_y_continuous(limits = c(0.002, 0.0075)) +
+    interaction_plot_theme +
+    labs(title = NULL, x = NULL, y = NULL)
+
+# ==========================================
+# 3. 使用 Patchwork 拼接三張圖
+# ==========================================
+panel_interactions <- (p_boss | p_junta | p_strongman) +
+    plot_layout(guides = "collect") +          
     plot_annotation(
-        # title = "Alliance Interaction Effects on MID Initiation",
         theme = theme(
             plot.title = element_text(hjust = 0.5, size = 13, face = "bold"),
             plot.subtitle = element_text(hjust = 0.5, size = 10, colour = "grey40")
         )
-    ) &                                        # ✨ 關鍵：使用 '&' 將設定應用到所有子圖
-    theme(legend.position = "bottom") &        # 將合併後的圖例置底
-    scale_y_continuous(limits = c(0, 0.01))     # ✨ 專業細節：強制統一 Y 軸範圍 (請依您的實際數據調整 0.2)
+    ) &                                        
+    theme(legend.position = "bottom") 
 
+# 顯示最終圖表
 panel_interactions
 
-ggsave("./Graph/interaction_boss_strongman.png", plot = panel_interactions,
-       width = 14, height = 12, units = "cm", dpi = 300)
+ggsave("./Graph/interaction_term.png", panel_interactions,
+       width = 14, height = 12, dpi = 300, units = "cm")
 
 # ==============================================================================
 # LaTeX Table: Setting 2 — All Variables, tabularray (tinytable) Format
