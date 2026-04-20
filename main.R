@@ -160,9 +160,6 @@ df <- df %>%
 summary(df$log_oil_usd_1)
 summary(df$tenure_1_log)
 
-# Check cross-tabulation of coups vs. regime types (e.g., Strongman)
-table(df$coup_realized_1, df$strongmanjlw_1)
-
 # The dataset is now ready for feglm (Fixed Effects Generalized Linear Models)
 # Standard Weeks (2012) Controls
 weeks_controls_rhs <- c(
@@ -224,6 +221,91 @@ m_oil_4 <- feglm(
 )
 
 # ==============================================================================
+# Tenure Plot: Predicted Probability by Regime Type across Tenure (m_oil_2)
+# ==============================================================================
+
+tenure_log_seq <- seq(0, log(56), length.out = 200)
+
+df_model <- subset(df, !is.na(democracy_1))
+
+mean_ctrl <- df_model %>%
+    summarise(
+        cap_1         = mean(cap_1, na.rm = TRUE),
+        cap_2         = mean(cap_2, na.rm = TRUE),
+        majmaj        = mean(majmaj, na.rm = TRUE),
+        minmaj        = mean(minmaj, na.rm = TRUE),
+        majmin        = mean(majmin, na.rm = TRUE),
+        pcyrsmzinit   = mean(pcyrsmzinit, na.rm = TRUE),
+        pcyrsmzinits1 = mean(pcyrsmzinits1, na.rm = TRUE),
+        pcyrsmzinits2 = mean(pcyrsmzinits2, na.rm = TRUE),
+        pcyrsmzinits3 = mean(pcyrsmzinits3, na.rm = TRUE),
+        democracy_2   = mean(democracy_2, na.rm = TRUE),
+        initshare     = mean(initshare, na.rm = TRUE),
+        dependlow     = mean(dependlow, na.rm = TRUE),
+        contigdum     = mean(contigdum, na.rm = TRUE),
+        logdist       = mean(logdist, na.rm = TRUE),
+        s_wt_glo      = mean(s_wt_glo, na.rm = TRUE),
+        s_lead_1      = mean(s_lead_1, na.rm = TRUE),
+        s_lead_2      = mean(s_lead_2, na.rm = TRUE),
+        tenure_2_log  = mean(tenure_2_log, na.rm = TRUE),
+        log_oil_usd_1 = mean(log_oil_usd_1, na.rm = TRUE),
+        atopally      = mean(atopally, na.rm = TRUE)
+    )
+
+regime_specs <- list(
+    Boss      = c(bossjlw_1 = 1, juntajlw_1 = 0, machinejlw_1 = 0, strongmanjlw_1 = 0, allotherauts_1 = 0),
+    Democracy = c(bossjlw_1 = 0, juntajlw_1 = 0, machinejlw_1 = 0, strongmanjlw_1 = 0, allotherauts_1 = 0),
+    Junta     = c(bossjlw_1 = 0, juntajlw_1 = 1, machinejlw_1 = 0, strongmanjlw_1 = 0, allotherauts_1 = 0),
+    Machine   = c(bossjlw_1 = 0, juntajlw_1 = 0, machinejlw_1 = 1, strongmanjlw_1 = 0, allotherauts_1 = 0),
+    Strongman = c(bossjlw_1 = 0, juntajlw_1 = 0, machinejlw_1 = 0, strongmanjlw_1 = 1, allotherauts_1 = 0)
+)
+
+pred_tenure <- map_dfr(names(regime_specs), function(rname) {
+    nd <- bind_cols(
+        data.frame(tenure_1_log = tenure_log_seq),
+        mean_ctrl,
+        as.data.frame(t(regime_specs[[rname]]))
+    )
+    p <- as.data.frame(predictions(m_ally_2, newdata = nd))
+    p$regime_type <- rname
+    p$tenure_val  <- exp(p$tenure_1_log) - 1
+    p
+})
+
+tenure_breaks <- c(0, 2, 6, 19, 54)
+
+tenure_colors <- c(
+    "Boss"      = "#E07070",
+    "Democracy" = "#A8A830",
+    "Junta"     = "#50A898",
+    "Machine"   = "#50C0E0",
+    "Strongman" = "#C080D0"
+)
+
+p_tenure <- ggplot(pred_tenure, aes(x = tenure_val, y = estimate,
+                                     color = regime_type, fill = regime_type)) +
+    geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, color = NA) +
+    geom_line(linewidth = 1) +
+    scale_x_continuous(
+        trans  = "log1p",
+        breaks = tenure_breaks,
+        labels = as.character(tenure_breaks)
+    ) +
+    scale_color_manual(name = "Regime Type", values = tenure_colors) +
+    scale_fill_manual(name = "Regime Type", values = tenure_colors) +
+    theme_bw() +
+    theme(
+        legend.position = "bottom",
+        panel.grid.minor = element_blank()
+    ) +
+    labs(x = "Tenure Length", y = "Predicted Probability of MID Initiation")
+
+print(p_tenure)
+
+ggsave("./Graph/tenure_plot.png", p_tenure,
+       width = 16, height = 12, dpi = 300, units = "cm")
+
+# ==============================================================================
 # Setting 2: Alliance Interactions + Log Oil
 # ==============================================================================
 
@@ -238,11 +320,12 @@ m_ally_1 <- feglm(
     cluster = ~dirdyadid
 )
 
+
 # Pooled Full
 m_ally_2 <- feglm(
     mzinit ~ machinejlw_1 + juntajlw_1 * atopally +
         bossjlw_1 * atopally + strongmanjlw_1 * atopally + allotherauts_1 +
-        tenure_1_log + democracy_2 +
+        tenure_1_log + democracy_2 + log_oil_usd_1 + tenure_2_log +
         cap_1 + cap_2 + initshare + dependlow +
         majmaj + minmaj + majmin + contigdum + logdist + s_wt_glo +
         s_lead_1 + s_lead_2 + pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
@@ -250,7 +333,16 @@ m_ally_2 <- feglm(
     family = "binomial",
     cluster = ~dirdyadid
 )
-
+m_ally_2_ <- glm(
+    mzinit ~ machinejlw_1 + juntajlw_1 * atopally +
+        bossjlw_1 * atopally + strongmanjlw_1 * atopally + allotherauts_1 +
+        tenure_1_log + democracy_2 + log_oil_usd_1 + tenure_2_log +
+        cap_1 + cap_2 + initshare + dependlow +
+        majmaj + minmaj + majmin + contigdum + logdist + s_wt_glo +
+        s_lead_1 + s_lead_2 + pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3,
+    data   = subset(df, !is.na(democracy_1)),
+    family = "binomial"
+)
 # FE Basic
 m_ally_3 <- feglm(
     mzinit ~ machinejlw_1 + juntajlw_1 * atopally +
@@ -264,13 +356,15 @@ m_ally_3 <- feglm(
 m_ally_4 <- feglm(
     mzinit ~ machinejlw_1 + juntajlw_1 * atopally + bossjlw_1 * atopally + 
         strongmanjlw_1 * atopally
-        + allotherauts_1 + tenure_1_log + democracy_2 +
+        + allotherauts_1 + tenure_1_log + democracy_2 + log_oil_usd_1 + tenure_2_log +
         cap_1 + cap_2 + initshare + dependlow +
         majmaj + minmaj + majmin + contigdum + logdist + s_wt_glo +
         s_lead_1 + s_lead_2 + pcyrsmzinit + pcyrsmzinits1 + pcyrsmzinits2 + pcyrsmzinits3 | dirdyadid,
     data   = subset(df, !is.na(democracy_1)),
     family = "binomial"
 )
+
+vif(m_ally_2)
 
 # ==============================================================================
 # Theme
@@ -349,7 +443,8 @@ panel_interactions <- (p_boss | p_junta | p_strongman) +
             plot.subtitle = element_text(hjust = 0.5, size = 10, colour = "grey40")
         )
     ) &                                        
-    theme(legend.position = "bottom") 
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) 
 
 # 顯示最終圖表
 panel_interactions
